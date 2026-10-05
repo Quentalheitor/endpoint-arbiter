@@ -1,0 +1,13 @@
+{
+  "record_id": "",
+  "event_id": "evt-0001",
+  "labels": {
+    "verdict": "UnknownVerdict",
+    "attack_techniques": [],
+    "provenance": {
+      "type": ""
+    },
+    "scenario_id": ""
+  },
+  "split": "invalid_split"
+}

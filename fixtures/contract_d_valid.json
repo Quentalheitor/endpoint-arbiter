@@ -1,0 +1,22 @@
+{
+  "record_id": "rec-0001",
+  "event_id": "evt-0001",
+  "labels": {
+    "verdict": "Malicious",
+    "attack_techniques": [
+      "T1059.001",
+      "T1071.001"
+    ],
+    "obfuscation_type": "Base64",
+    "provenance": {
+      "type": "emulation",
+      "test_id": "<emulation test id>"
+    },
+    "scenario_id": "scn-014"
+  },
+  "split": "test",
+  "injection": {
+    "category": null,
+    "target_field": null
+  }
+}

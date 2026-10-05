@@ -1,0 +1,13 @@
+{
+  "observable_value": "",
+  "observable_type": "ip_address",
+  "reputation": {
+    "score": 150,
+    "verdict": "",
+    "source": ""
+  },
+  "cache_metadata": {
+    "cached_at": "not-a-date",
+    "ttl_seconds": -500
+  }
+}

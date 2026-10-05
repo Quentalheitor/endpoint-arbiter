@@ -1,0 +1,24 @@
+{
+  "observable_value": "198.51.100.42",
+  "observable_type": "ip_address",
+  "reputation": {
+    "score": 88,
+    "verdict": "Malicious",
+    "source": "mock_fixture",
+    "threat_categories": [
+      "Command and Control"
+    ]
+  },
+  "historical_context": {
+    "first_seen": "2026-08-15T09:12:00Z",
+    "last_seen": "2026-10-02T18:40:00Z",
+    "asn": "AS64496",
+    "country": "ZZ"
+  },
+  "cache_metadata": {
+    "mode": "frozen",
+    "snapshot_id": "enrich-v1",
+    "cached_at": "2026-10-03T14:32:02Z",
+    "ttl_seconds": 86400
+  }
+}

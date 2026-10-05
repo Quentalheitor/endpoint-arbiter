@@ -1,0 +1,12 @@
+{
+  "triage_id": "trg-0001",
+  "reference_event_id": "evt-0001",
+  "analysis_timestamp": "2026-10-03T14:32:03Z",
+  "config_version": "v1.0",
+  "verdict": "DefinitelyMalicious",
+  "metrics": {
+    "risk_score": 120,
+    "confidence_score": -5
+  },
+  "justification": ""
+}
