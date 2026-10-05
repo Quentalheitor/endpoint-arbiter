@@ -68,12 +68,16 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+*.env
 .venv
+.venv/
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
 
 # Spyder project settings
 .spyderproject
@@ -117,4 +121,7 @@ Thumbs.db
 data/
 *.duckdb
 *.duckdb.wal
+*.sqlite
+*.sqlite3
+*.db
 blank.pdf

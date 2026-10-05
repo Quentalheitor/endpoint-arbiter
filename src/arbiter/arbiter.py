@@ -128,13 +128,27 @@ class Arbiter:
             metrics={"risk_score": risk_score, "confidence_score": confidence_score},
             tier_trace=[
                 {"tier": "A", "rule_ids": ["SIGMA-PROC-IWR"] if rule_hit else []},
-                {"tier": "C", "role": "extractor", "model_version": "quarantined-v1"},
+                {
+                    "tier": "C",
+                    "role": "extractor",
+                    "model_version": "quarantined-v1",
+                    "cost_log": (
+                        extractor_res.cost_log.model_dump()
+                        if hasattr(extractor_res, "cost_log")
+                        else None
+                    ),
+                },
                 {
                     "tier": "C",
                     "role": "arbiter",
                     "model_version": "privileged-arbiter-v1",
                 },
             ],
+            cost_log=(
+                extractor_res.cost_log.model_dump()
+                if hasattr(extractor_res, "cost_log")
+                else None
+            ),
             decoded_content={
                 "command_line_decoded": decoded_cmd,
                 "obfuscation_type": obf_type,

@@ -34,7 +34,10 @@ class StorageManager:
             db_path = os.getenv("ARBITER_DB_PATH", "data/arbiter.duckdb")
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = duckdb.connect(db_path)
+        try:
+            self.conn = duckdb.connect(db_path)
+        except (duckdb.Error, OSError):
+            self.conn = duckdb.connect(":memory:")
         self._init_db()
 
     def _init_db(self) -> None:

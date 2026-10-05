@@ -46,6 +46,15 @@ def test_full_pipeline_valid_contract_a() -> None:
     assert len(data["recommended_response"]) >= 1
     assert data["recommended_response"][0]["action"] == "Isolate Host"
 
+    # Verify Concept 7: LLM Cost and Token Logging
+    assert data["cost_log"] is not None
+    assert data["cost_log"]["prompt_tokens"] > 0
+    assert data["cost_log"]["completion_tokens"] > 0
+    assert data["cost_log"]["total_tokens"] == (
+        data["cost_log"]["prompt_tokens"] + data["cost_log"]["completion_tokens"]
+    )
+    assert data["cost_log"]["cost_usd"] > 0
+
 
 def test_pipeline_rejects_invalid_contract_a() -> None:
     """Test that schema validation rejects malformed Contract A payloads.

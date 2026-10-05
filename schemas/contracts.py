@@ -111,7 +111,22 @@ class InjectionCategory(str, Enum):
 
 
 def coerce_to_utc_datetime(v: Any) -> datetime:
-    """Coerce input timestamps into timezone-aware UTC datetime."""
+    """Coerce input timestamps into a timezone-aware UTC datetime instance.
+
+    Parses ISO-8601 formatted strings (supporting trailing 'Z' or offset notations)
+    or validates existing datetime objects. Naive datetime objects are assumed to be
+    in UTC, while offset-aware datetimes are converted to UTC.
+
+    Args:
+        v: The input timestamp value, expected as an ISO-8601 string or datetime object.
+
+    Returns:
+        datetime: A timezone-aware datetime instance in UTC (timezone.utc).
+
+    Raises:
+        TypeError: If the input is neither a string nor a datetime instance.
+        ValueError: If the string cannot be parsed as a valid ISO-8601 timestamp.
+    """
     if isinstance(v, str):
         cleaned = v.strip()
         if cleaned.endswith("Z"):
@@ -132,7 +147,17 @@ def coerce_to_utc_datetime(v: Any) -> datetime:
 
 
 def serialize_utc_datetime(dt: datetime) -> str:
-    """Format UTC datetime as an ISO-8601 string ending with Z."""
+    """Format a UTC datetime object as an ISO-8601 string ending with Z.
+
+    Converts the datetime to UTC and formats it with second or microsecond precision,
+    appending 'Z' to designate the zero UTC offset.
+
+    Args:
+        dt: The datetime instance to serialize.
+
+    Returns:
+        str: ISO-8601 formatted string ending with 'Z' (e.g. '2026-10-05T14:30:00Z').
+    """
     utc_dt = dt.astimezone(timezone.utc)
     if utc_dt.microsecond > 0:
         return utc_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -278,7 +303,15 @@ class NormalizedInputTelemetry(BaseModel):
     )
 
     def compute_canonical_hash(self) -> str:
-        """Compute the cryptographic SHA-256 digest over the canonical JSON representation."""
+        """Compute the cryptographic SHA-256 digest over the canonical JSON representation.
+
+        Dumps the model excluding the 'event_hash' field itself, sorts all JSON keys,
+        and generates a deterministic SHA-256 hex digest to serve as a tamper-evident
+        event identifier.
+
+        Returns:
+            str: 64-character lowercase hexadecimal SHA-256 hash string.
+        """
         data = self.model_dump(mode="json", exclude={"event_hash"})
         canonical_json = json.dumps(data, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
@@ -403,6 +436,25 @@ class TriageMetrics(BaseModel):
     )
 
 
+class CostLog(BaseModel):
+    """Token consumption and estimated inference cost log for LLM execution."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    prompt_tokens: int = Field(
+        default=0, ge=0, description="Number of tokens in the prompt."
+    )
+    completion_tokens: int = Field(
+        default=0, ge=0, description="Number of tokens in the generated completion."
+    )
+    total_tokens: int = Field(
+        default=0, ge=0, description="Total tokens consumed in the LLM execution."
+    )
+    cost_usd: float = Field(
+        default=0.0, ge=0.0, description="Estimated inference cost in USD."
+    )
+
+
 class TierTraceEntry(BaseModel):
     """Diagnostic execution trace for a single decision tier."""
 
@@ -427,6 +479,10 @@ class TierTraceEntry(BaseModel):
     )
     reason_codes: list[str] | None = Field(
         default=None, description="Interpretability reason codes emitted by Tier B."
+    )
+    cost_log: CostLog | None = Field(
+        default=None,
+        description="Token consumption and estimated inference cost log for this tier.",
     )
 
 
@@ -514,6 +570,10 @@ class ImmutableTriageArtifact(BaseModel):
     tier_trace: list[TierTraceEntry] = Field(
         default_factory=list,
         description="Audit trace of participating reasoning tiers (Invariant I4).",
+    )
+    cost_log: CostLog | None = Field(
+        default=None,
+        description="Aggregated token usage and estimated inference cost log across all tiers.",
     )
     decoded_content: DecodedContent = Field(
         ..., description="Deterministic decoding results and de-obfuscation evidence."
