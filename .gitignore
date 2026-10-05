@@ -112,3 +112,9 @@ cython_debug/
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Databases & local generated artifacts (FlyRank Requirement)
+data/
+*.duckdb
+*.duckdb.wal
+blank.pdf
