@@ -116,7 +116,7 @@ cython_debug/
 # OS specific files
 .DS_Store
 Thumbs.db
-
+sklearn
 # Databases & local generated artifacts (FlyRank Requirement)
 data/
 *.duckdb
