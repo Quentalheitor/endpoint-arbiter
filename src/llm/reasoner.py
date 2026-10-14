@@ -20,7 +20,7 @@ logger = logging.getLogger("endpoint_arbiter.privileged_reasoner")
 STRICT_MODEL_CONFIG = ConfigDict(strict=True, extra="forbid")
 
 
-class Primary_intent(StrEnum):
+class Intent(StrEnum):
     DOWNLOAD_EXECUTE = "DOWNLOAD_EXECUTE"
     DEFENSE_EVASION = "DEFENSE_EVASION"
     DISCOVERY_RECONNAISSANCE = "DISCOVERY_RECONNAISSANCE"
@@ -212,3 +212,44 @@ class Enrichment_Observable(BaseModel):
     REPUTATION_SCOR: int = Field(..., ge=0, le=100)
     THREATH_CATEGORIES: List[str] = Field(default_factory=list)
     ASN: Optional[str] = None
+
+
+class Valid_Target_Roster(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+    HOSTS: List[str] = Field(default_factory=list)
+    USERS: List[str] = Field(default_factory=list)
+    IPS: List[str] = Field(default_factory=list)
+
+
+class Provenance_Block(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+    EVENT_ID: str = Field(..., pattern=r"evt-[a-zA-Z0-9_-]+$")
+    EVENT_HASH: str = Field(..., pattern=r"^[a-f0-9]{64}$")
+    TIMESTAMP: str
+
+
+class Extractor_Signals(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+    PRIMARY_INTENT: Intent
+    SUB_INTENTS: List[Intent] = Field(default_factory=list)
+    SUSPICIOUS_CONTRUCTS: List[Suspicious_Construct_Types] = Field(default_factory=list)
+    OBFUSCATION_TYPE: Obfuscation_signature
+
+
+class Atomic_Tokens(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+    NORMALIZED_PROCESS: Normalized_Target_Binariees
+    SANITIZED_TARGETS: List[Destination_network_observables] = Field(
+        default_factory=list
+    )
+
+
+class PriviledgedReasonerInput(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+    PROVENANCE_BLOCK: Provenance_Block
+    EXTRACTOR_SIGNALS: Extractor_Signals
+    ATOMIC_TOKENS: Atomic_Tokens
+    TIER_A_CONTAINER: Aggregate_TierA_container
+    TIER_B_CLASSIFIER: TierB_Classifier
+    CONTEXT_ENRICHMENT: List[Enrichment_Observable] = Field(default_factory=list)
+    TARGET_ROSTER: Valid_Target_Roster
