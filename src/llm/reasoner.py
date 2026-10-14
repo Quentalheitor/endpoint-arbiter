@@ -1,11 +1,20 @@
-from enum import StrEnum
-from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
-import unicodedata
 from pathlib import PureWindowsPath
-from pydantic.networks import IPvAnyAddress
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+)
 import re
-from pydantic import field_validator
+import logging
+from enum import StrEnum
+from typing import Dict, List, Literal, Optional, Set
+from pydantic.networks import IPvAnyAddress
+import unicodedata
+
+
+logger = logging.getLogger("endpoint_arbiter.privileged_reasoner")
 
 
 STRICT_MODEL_CONFIG = ConfigDict(strict=True, extra="forbid")
@@ -30,12 +39,50 @@ class Suspicious_Construct_Types(StrEnum):
     NONE = "NONE"
 
 
+class Rule_Severity(StrEnum):
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    INFORMATIONAL = "INFORMATIONAL"
+
+
+class MLReasonCode(StrEnum):
+    HIGH_COMMAND_ENTROPY = "HIGH_COMMAND_ENTROPY"
+    OFF_HOURS_EXECUTION = "OFF_HOURS_EXECUTION"
+    ANOMALOUS_PARENT_CHILD_RELATION = "ANOMALOUS_PARENT_CHILD_RELATION"
+    EXCESSIVE_FLAG_DENSITY = "EXCESSIVE_FLAG_DENSITY"
+    KNOWN_ADMIN_PROFILE = "KNOWN_ADMIN_PROFILE"
+    DEFAULT_BENIGN_SCORE = "DEFAULT_BENIGN_SCORE"
+
+
 class Destination_network_observables(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     IP_ADRESS: IPvAnyAddress
     FQDN: str = Field(max_length=253, pattern=r"^[a-zA-Z0-9.-]+$")
     DESTINATION_PORT: int = Field(ge=1, le=65535)
     TRANSPORT_PROTOCOL: list[Literal["TCP", "UDP", "ICMP"]]
+
+
+class Obfuscation_categories(StrEnum):
+    BASE64_UTF16LE = "BASE_UTF16LE"
+    BASE64_ASCII = "BASE64_ASCII"
+    STRING_CONCAT = "STRING_CONCAT"
+    ENVIRONMENT_VARIABLE = "ENVIRONMENT_VARIABLE"
+    NONE = "NONE"
+
+
+class TriageVerdict(StrEnum):
+    MALICIOUS = "Malicious"
+    BENIGN = "Benign"
+    NEEDS_REVIEW = "Needs-Review"
+
+
+class ResponsePriority(StrEnum):
+    P0 = "P0"
+    P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
 
 
 class Normalized_Target_Binariees(BaseModel):
@@ -88,39 +135,80 @@ class Execution_priviledges(StrEnum):
     SYSTEM = "SYSTEM"
 
 
-class Obfuscation_categories(StrEnum):
-    BASE64_UTF16LE = "BASE_UTF16LE"
-    BASE64_ASCII = "BASE64_ASCII"
-    STRING_CONCAT = "STRING_CONCAT"
-    ENVIRONMENT_VARIABLE = "ENVIRONMENT_VARIABLE"
-    NONE = "NONE"
-
-
 class Obfuscation_signature(BaseModel):
     signature: Obfuscation_categories
 
 
-class Rule_Severity(StrEnum):
-    CRITICAL = "CRITICAL"
-    HIGH = "HIGH"
-    MEDIUM = "MEDIUM"
-    LOW = "LOW"
-    INFORMATIONAL = "INFORMATIONAL"
+SEVERITY_WEIGHTS: Dict[Rule_Severity, int] = {
+    Rule_Severity.CRITICAL: 5,
+    Rule_Severity.HIGH: 4,
+    Rule_Severity.MEDIUM: 3,
+    Rule_Severity.LOW: 2,
+    Rule_Severity.INFORMATIONAL: 1,
+    Rule_Severity.NONE: 0,
+}
+
+TECHNIQUE_REGEX = re.compile(r"^T\d{4}(\.\d{3})?$")
 
 
 class Rule_Match_TierA(BaseModel):
-    RULE_IDENTIFIER: str
+    RULE_IDENTIFIER: str = Field(..., pattern=r"^sigma-[a-z0-9_-]+$")
     RULE_SEVERITY: Rule_Severity
-    MITRE_ATTACK_TECH: list[str]
-    RULE_TITLE: str | None = None
+    MITRE_ATTACK_TECH: list[str] = Field(default_factory=list)
+    RULE_TITLE: Optional[str] = None
 
-
-class Maximum_severity_level(StrEnum):
-    MAX = list[Rule_Match_TierA] = None
-    # @field_validator
-    # @classmethod
+    @field_validator("attack_techniques")
+    @classmethod
+    def validate_techniques(cls, value: list[str]) -> list[str]:
+        for x in value:
+            if not TECHNIQUE_REGEX.match:
+                raise ValueError(f"Invalid MITRE ATT&CK ID: {x}")
+        return value
 
 
 class Aggregate_TierA_container(BaseModel):
     MATCHED_RULES: list[Rule_Match_TierA] = []
-    MAXIMUM_SEVERITY_LEVEL: str
+
+    @property
+    @computed_field
+    def max_sev(self) -> Rule_Severity:
+        if not self.MATCHED_RULES:
+            return Rule_Severity.NONE
+        return max(
+            (rule.severity for rule in self.MATCHED_RULES),
+            key=lambda sev: SEVERITY_WEIGHTS[sev],
+        )
+
+    @property
+    @computed_field
+    def attack_techniques(self) -> list[str]:
+        unique: Set[str] = set()
+        for rule in self.MATCHED_RULES:
+            unique.update(rule.MITRE_ATTACK_TECH)
+        return sorted(list[unique])
+
+    @property
+    @computed_field
+    def is_sev_high(self) -> bool:
+        if self.max_sev == "HIGH" or self.max_sev == "CRITICAL":
+            return True
+        else:
+            return False
+
+
+class TierB_Classifier(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+    MALICIOUS_PROBABILITY: float = Field(..., ge=0.0, le=1.0)
+    REASON_CODES: List[MLReasonCode] = Field(default_factory=list)
+
+
+class Enrichment_Observable(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+    OBSERVABLE_VALUE: str
+    OBSERVABLE_TYPE: Literal["ip_address", "domain", "file_hash"]
+    REPUTATION_VERDICT: Literal[
+        "Malicious", "Suspicious", "Neutral", "Benign", "Unknown"
+    ]
+    REPUTATION_SCOR: int = Field(..., ge=0, le=100)
+    THREATH_CATEGORIES: List[str] = Field(default_factory=list)
+    ASN: Optional[str] = None
