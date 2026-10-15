@@ -253,3 +253,42 @@ class PriviledgedReasonerInput(BaseModel):
     TIER_B_CLASSIFIER: TierB_Classifier
     CONTEXT_ENRICHMENT: List[Enrichment_Observable] = Field(default_factory=list)
     TARGET_ROSTER: Valid_Target_Roster
+
+
+class Technical_Mapping(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+    FRAMEWORK: Literal["MITRE_ATTACK", "MITRE_ATLAS"] = "MITRE_ATTACK"
+    ID: str = Field(..., pattern=r"^T\d{4}(\.\d{3})?$")
+    NAME: str
+
+
+class Recommended_Response(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+    ACTION: str
+    TARGET: str
+    PRIORITY: ResponsePriority
+
+
+class Priviledged_Reasoner_Output(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+    VERDICT: TriageVerdict
+    RISK_SCORE: int = Field(..., ge=0, le=100)
+    CONFIDENCE_SCORE: int = Field(..., ge=0, le=100)
+    MAPPED_TECHNIQUES: List[Technical_Mapping] = Field(default_factory=list)
+    JUSTIFICATION: str
+    RECOMMENDED_RESPONSE = List[Recommended_Response] = Field(default_factory=list)
+
+    def inspect_action_list(self, roster=Valid_Target_Roster) -> None:
+        allow = set(roster.HOSTS, roster.USERS, roster.IPS)
+        possible_actions: List[Recommended_Response] = []
+
+        for x in self.RECOMMENDED_RESPONSE:
+            if x.TARGET in allow:
+                possible_actions.append(x)
+            else:
+                logger.warning(
+                    "Invariant 15 triggered: Unauthorized target '%s' discarded from action '%s'.",
+                    x.TARGET,
+                    x.ACTION,
+                )
+        self.RECOMMENDED_RESPONSE = possible_actions
