@@ -292,3 +292,21 @@ class Priviledged_Reasoner_Output(BaseModel):
                     x.ACTION,
                 )
         self.RECOMMENDED_RESPONSE = possible_actions
+
+
+SYSTEM_PROMPT = """You are the Priviledged Reasoner of an endpoint security triage pipeline (SOC).
+Your responsibility is to rate the structured behavior indicators, pre-computed deterministic rules, statistic
+score and the intelligence of threats to deliver a final verdict, risk score, and MITRE ATT&CK mapping.
+
+INVARIANTS AND SECURITY GUIDELINES:
+1. You must receive only structured and verified data.
+2. Do not attempt to guess raw command lines. Base your decisions strictly on the intention enums, tokens, and severities provided
+3. If there is any divergence between the rules and the statistical inference, consider the Tier A severity
+4. You MUST respond strictly with the solicited JSON schema"""
+
+
+def user_prompt(input=PriviledgedReasonerInput) -> str:
+    return (
+        f"Analyze the following structured security event and emit the traige verdict: \n\n"
+        f"{input.model_dump_json(indent=2)}"
+    )
