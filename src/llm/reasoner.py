@@ -2,6 +2,7 @@ from pathlib import PureWindowsPath
 from pydantic import (
     BaseModel,
     ConfigDict,
+    ValidationError,
     Field,
     computed_field,
     field_validator,
@@ -9,7 +10,7 @@ from pydantic import (
 import re
 import logging
 from enum import StrEnum
-from typing import Dict, List, Literal, Optional, Set
+from typing import Dict, List, Literal, Optional, Set, Any
 from pydantic.networks import IPvAnyAddress
 import unicodedata
 
@@ -287,7 +288,7 @@ class Priviledged_Reasoner_Output(BaseModel):
                 possible_actions.append(x)
             else:
                 logger.warning(
-                    "Invariant 15 triggered: Unauthorized target '%s' discarded from action '%s'.",
+                    "Invariant 5 triggered: Unauthorized target '%s' discarded from action '%s'.",
                     x.TARGET,
                     x.ACTION,
                 )
@@ -305,8 +306,74 @@ INVARIANTS AND SECURITY GUIDELINES:
 4. You MUST respond strictly with the solicited JSON schema"""
 
 
-def user_prompt(input=PriviledgedReasonerInput) -> str:
+def user_prompt_constructor(input=PriviledgedReasonerInput) -> str:
     return (
-        f"Analyze the following structured security event and emit the traige verdict: \n\n"
+        f"Analyze the following structured security event and emit the triage verdict: \n\n"
         f"{input.model_dump_json(indent=2)}"
     )
+
+
+def priviledged_reasoner_executer(
+    raw_input: Dict[str, any], llm_client: Any = None, model_name: str = "gpt-4o"
+) -> Dict[str, Any]:
+    try:
+        valid_input = PriviledgedReasonerInput.model_validate(raw_input)
+    except (ValidationError, ValueError) as e:
+        logger.exception(
+            "Invariant 2 triggered: Input schema validation failure: %s", e
+        )
+        return {
+            "verdict": TriageVerdict.NEEDS_REVIEW.value,
+            "state": "degraded",
+            "risk_score": 50,
+            "confidence_score": 0,
+            "justification": f"Degradação automática por violação de schema ou token suspeito: {str(e)}",
+            "tier_trace": [
+                {"tier": "C", "role": "reasoner", "status": "validation_failed"}
+            ],
+            "recommended_response": [],
+            "techniques": [],
+        }
+    try:
+        user_prompt = user_prompt_constructor(valid_input)
+        response = llm_client.beta.chat.completion.parse(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format=Priviledged_Reasoner_Output,
+            temperature=0.0,
+            seed=42,
+        )
+        parsed_output: Priviledged_Reasoner_Output = response.choices[0].message.parsed
+    except Exception as e:
+        logger.error("Invariante 2 acionada: Falha de execução no provedor LLM: %s", e)
+        return {
+            "verdict": TriageVerdict.NEEDS_REVIEW.value,
+            "state": "degraded",
+            "risk_score": 60
+            if valid_input.tier_a_rules.is_high_confidence_match
+            else 30,
+            "confidence_score": 0,
+            "justification": f"Degradação por indisponibilidade ou saída malformada do LLM: {str(e)}",
+            "tier_trace": [{"tier": "C", "role": "reasoner", "status": "llm_error"}],
+            "recommended_response": [],
+            "techniques": [],
+        }
+    parsed_output.inspect_action_list(Valid_Target_Roster.model_validate(valid_input))
+    if valid_input.TIER_A_CONTAINER.is_sev_high:
+        if parsed_output.verdict == TriageVerdict.BENIGN:
+            logger.warning(
+                "Invariant 1 triggered: Downgrading attempt blocked. \n High confidence '%s' forces Malicious verdict",
+                valid_input.TIER_A_CONTAINER.max_sev,
+            )
+            final_verdict = TriageVerdict.MALICIOUS
+
+    result = parsed_output.model_dump()
+    result["verdict"] = final_verdict.value
+    result["state"] = "complete"
+    result["tier_trace"] = [
+        {"tier": "C", "role": "reasoner", "model_version": model_name}
+    ]
+    return result
