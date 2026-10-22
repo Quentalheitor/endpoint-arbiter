@@ -6,11 +6,12 @@ from pydantic import (
     Field,
     computed_field,
     field_validator,
+    model_validator,
 )
 import re
 import logging
 from enum import StrEnum
-from typing import Dict, List, Literal, Optional, Set, Any
+from typing import Dict, List, Literal, Optional, Set, Any, Union
 from pydantic.networks import IPvAnyAddress
 import unicodedata
 
@@ -46,6 +47,7 @@ class Rule_Severity(StrEnum):
     MEDIUM = "MEDIUM"
     LOW = "LOW"
     INFORMATIONAL = "INFORMATIONAL"
+    NONE = "NONE"
 
 
 class MLReasonCode(StrEnum):
@@ -59,18 +61,28 @@ class MLReasonCode(StrEnum):
 
 class Destination_network_observables(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    IP_ADRESS: IPvAnyAddress
-    FQDN: str = Field(max_length=253, pattern=r"^[a-zA-Z0-9.-]+$")
+    IP_ADDRESS: Optional[Union[IPvAnyAddress, str]] = None
+    FQDN: Optional[str] = Field(
+        default=None, max_length=253, pattern=r"^[a-zA-Z0-9.-]+$"
+    )
     DESTINATION_PORT: int = Field(ge=1, le=65535)
-    TRANSPORT_PROTOCOL: list[Literal["TCP", "UDP", "ICMP"]]
+    TRANSPORT_PROTOCOL: Literal["TCP", "UDP", "ICMP"]
+
+    @model_validator(mode="after")
+    def validate_destination_present(self) -> "Destination_network_observables":
+        if self.IP_ADDRESS is None and self.FQDN is None:
+            raise ValueError(
+                "At least a single destination (IP or FQDN) must be mentioned"
+            )
+        return self
 
 
 class Obfuscation_categories(StrEnum):
-    BASE64_UTF16LE = "BASE_UTF16LE"
-    BASE64_ASCII = "BASE64_ASCII"
-    STRING_CONCAT = "STRING_CONCAT"
-    ENVIRONMENT_VARIABLE = "ENVIRONMENT_VARIABLE"
-    NONE = "NONE"
+    NONE = "None"
+    BASE64 = "Base64"
+    CONCATENATION = "Concatenation"
+    VARIABLE_EXPANSION = "Variable_Expansion"
+    MIXED = "Mixed"
 
 
 class TriageVerdict(StrEnum):
@@ -86,10 +98,10 @@ class ResponsePriority(StrEnum):
     P3 = "P3"
 
 
-class Normalized_Target_Binariees(BaseModel):
+class Normalized_Target_Binaries(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     PROCESS_BINARY_NAME: str
-    PARENT_BINARY_NAME: str
+    PARENT_BINARY_NAME: Optional[str] = None
     EXECUTION_PRIVILEGE: bool
 
     @field_validator("PROCESS_BINARY_NAME", "PARENT_BINARY_NAME", mode="before")
@@ -106,24 +118,21 @@ class Normalized_Target_Binariees(BaseModel):
         leaf_filename = PureWindowsPath(clean_char.strip("\"'/\\ "))
         EXTENSOES_WIN_EXEC = {
             ".exe",
-            ".bat",
-            ".cmd",
-            ".msi",
-            ".com",
-            ".pif",
+            ".dll",
+            ".sys",
             ".scr",
-            ".vbs",
-            ".wsf",
-            ".ps1",
+            ".bin",
         }
         if leaf_filename.suffix.lower() in EXTENSOES_WIN_EXEC:
-            return leaf_filename.suffix.lower()
+            return leaf_filename.name.lower()
         else:
             raise ValueError("Filename does not posses approved executable extension")
 
     @field_validator("PROCESS_BINARY_NAME", "PARENT_BINARY_NAME", mode="after")
     @classmethod
-    def enforce_string_rules(cls, value: str) -> str:
+    def enforce_string_rules(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
         if re.match("^[a-z0-9._-]+$", value) and len(value) <= 64:
             return value
         else:
@@ -134,10 +143,6 @@ class Execution_priviledges(StrEnum):
     ELEVATED = "ELEVATED"
     STANDART = "STANDART"
     SYSTEM = "SYSTEM"
-
-
-class Obfuscation_signature(BaseModel):
-    signature: Obfuscation_categories
 
 
 SEVERITY_WEIGHTS: Dict[Rule_Severity, int] = {
@@ -158,11 +163,11 @@ class Rule_Match_TierA(BaseModel):
     MITRE_ATTACK_TECH: list[str] = Field(default_factory=list)
     RULE_TITLE: Optional[str] = None
 
-    @field_validator("attack_techniques")
+    @field_validator("MITRE_ATTACK_TECH")
     @classmethod
     def validate_techniques(cls, value: list[str]) -> list[str]:
         for x in value:
-            if not TECHNIQUE_REGEX.match:
+            if not TECHNIQUE_REGEX.match(x):
                 raise ValueError(f"Invalid MITRE ATT&CK ID: {x}")
         return value
 
@@ -170,26 +175,26 @@ class Rule_Match_TierA(BaseModel):
 class Aggregate_TierA_container(BaseModel):
     MATCHED_RULES: list[Rule_Match_TierA] = []
 
-    @property
     @computed_field
+    @property
     def max_sev(self) -> Rule_Severity:
         if not self.MATCHED_RULES:
             return Rule_Severity.NONE
         return max(
-            (rule.severity for rule in self.MATCHED_RULES),
+            (rule.RULE_SEVERITY for rule in self.MATCHED_RULES),
             key=lambda sev: SEVERITY_WEIGHTS[sev],
         )
 
-    @property
     @computed_field
+    @property
     def attack_techniques(self) -> list[str]:
         unique: Set[str] = set()
         for rule in self.MATCHED_RULES:
             unique.update(rule.MITRE_ATTACK_TECH)
         return sorted(list[unique])
 
-    @property
     @computed_field
+    @property
     def is_sev_high(self) -> bool:
         if self.max_sev == "HIGH" or self.max_sev == "CRITICAL":
             return True
@@ -210,8 +215,8 @@ class Enrichment_Observable(BaseModel):
     REPUTATION_VERDICT: Literal[
         "Malicious", "Suspicious", "Neutral", "Benign", "Unknown"
     ]
-    REPUTATION_SCOR: int = Field(..., ge=0, le=100)
-    THREATH_CATEGORIES: List[str] = Field(default_factory=list)
+    REPUTATION_SCORE: int = Field(..., ge=0, le=100)
+    THREAT_CATEGORIES: List[str] = Field(default_factory=list)
     ASN: Optional[str] = None
 
 
@@ -224,7 +229,7 @@ class Valid_Target_Roster(BaseModel):
 
 class Provenance_Block(BaseModel):
     model_config = STRICT_MODEL_CONFIG
-    EVENT_ID: str = Field(..., pattern=r"evt-[a-zA-Z0-9_-]+$")
+    EVENT_ID: str = Field(..., pattern=r"^evt-[a-zA-Z0-9_-]+$")
     EVENT_HASH: str = Field(..., pattern=r"^[a-f0-9]{64}$")
     TIMESTAMP: str
 
@@ -233,13 +238,15 @@ class Extractor_Signals(BaseModel):
     model_config = STRICT_MODEL_CONFIG
     PRIMARY_INTENT: Intent
     SUB_INTENTS: List[Intent] = Field(default_factory=list)
-    SUSPICIOUS_CONTRUCTS: List[Suspicious_Construct_Types] = Field(default_factory=list)
-    OBFUSCATION_TYPE: Obfuscation_signature
+    SUSPICIOUS_CONSTRUCTS: List[Suspicious_Construct_Types] = Field(
+        default_factory=list
+    )
+    OBFUSCATION_TYPE: Obfuscation_categories
 
 
 class Atomic_Tokens(BaseModel):
     model_config = STRICT_MODEL_CONFIG
-    NORMALIZED_PROCESS: Normalized_Target_Binariees
+    NORMALIZED_PROCESS: Normalized_Target_Binaries
     SANITIZED_TARGETS: List[Destination_network_observables] = Field(
         default_factory=list
     )
@@ -247,19 +254,19 @@ class Atomic_Tokens(BaseModel):
 
 class PriviledgedReasonerInput(BaseModel):
     model_config = STRICT_MODEL_CONFIG
-    PROVENANCE_BLOCK: Provenance_Block
-    EXTRACTOR_SIGNALS: Extractor_Signals
-    ATOMIC_TOKENS: Atomic_Tokens
-    TIER_A_CONTAINER: Aggregate_TierA_container
-    TIER_B_CLASSIFIER: TierB_Classifier
-    CONTEXT_ENRICHMENT: List[Enrichment_Observable] = Field(default_factory=list)
-    TARGET_ROSTER: Valid_Target_Roster
+    provenance_block: Provenance_Block
+    extractor_signal: Extractor_Signals
+    atomic_tokens: Atomic_Tokens
+    tier_a_container: Aggregate_TierA_container
+    tier_b_classifier: TierB_Classifier
+    context_enrichment: List[Enrichment_Observable] = Field(default_factory=list)
+    target_roster: Valid_Target_Roster
 
 
 class Technical_Mapping(BaseModel):
     model_config = STRICT_MODEL_CONFIG
     FRAMEWORK: Literal["MITRE_ATTACK", "MITRE_ATLAS"] = "MITRE_ATTACK"
-    ID: str = Field(..., pattern=r"^T\d{4}(\.\d{3})?$")
+    ID: str = Field(..., pattern=r"^(T\d{4}(\.\d{3})?|AML\.T\d{4}(\.\d{3})?)$")
     NAME: str
 
 
@@ -272,18 +279,18 @@ class Recommended_Response(BaseModel):
 
 class Priviledged_Reasoner_Output(BaseModel):
     model_config = STRICT_MODEL_CONFIG
-    VERDICT: TriageVerdict
-    RISK_SCORE: int = Field(..., ge=0, le=100)
-    CONFIDENCE_SCORE: int = Field(..., ge=0, le=100)
-    MAPPED_TECHNIQUES: List[Technical_Mapping] = Field(default_factory=list)
-    JUSTIFICATION: str
-    RECOMMENDED_RESPONSE = List[Recommended_Response] = Field(default_factory=list)
+    verdict: TriageVerdict
+    risk_score: int = Field(..., ge=0, le=100)
+    confidence_score: int = Field(..., ge=0, le=100)
+    mapped_techniques: List[Technical_Mapping] = Field(default_factory=list)
+    justification: str
+    recommended_response: List[Recommended_Response] = Field(default_factory=list)
 
-    def inspect_action_list(self, roster=Valid_Target_Roster) -> None:
-        allow = set(roster.HOSTS, roster.USERS, roster.IPS)
+    def inspect_action_list(self, roster: Valid_Target_Roster) -> None:
+        allow = set(roster.HOSTS + roster.USERS + roster.IPS)
         possible_actions: List[Recommended_Response] = []
 
-        for x in self.RECOMMENDED_RESPONSE:
+        for x in self.recommended_response:
             if x.TARGET in allow:
                 possible_actions.append(x)
             else:
@@ -292,7 +299,7 @@ class Priviledged_Reasoner_Output(BaseModel):
                     x.TARGET,
                     x.ACTION,
                 )
-        self.RECOMMENDED_RESPONSE = possible_actions
+        self.recommended_response = possible_actions
 
 
 SYSTEM_PROMPT = """You are the Priviledged Reasoner of an endpoint security triage pipeline (SOC).
@@ -306,15 +313,15 @@ INVARIANTS AND SECURITY GUIDELINES:
 4. You MUST respond strictly with the solicited JSON schema"""
 
 
-def user_prompt_constructor(input=PriviledgedReasonerInput) -> str:
+def user_prompt_constructor(input_data: PriviledgedReasonerInput) -> str:
     return (
         f"Analyze the following structured security event and emit the triage verdict: \n\n"
-        f"{input.model_dump_json(indent=2)}"
+        f"{input_data.model_dump_json(indent=2)}"
     )
 
 
 def priviledged_reasoner_executer(
-    raw_input: Dict[str, any], llm_client: Any = None, model_name: str = "gpt-4o"
+    raw_input: Dict[str, Any], llm_client: Any = None, model_name: str = "gpt-4o"
 ) -> Dict[str, Any]:
     try:
         valid_input = PriviledgedReasonerInput.model_validate(raw_input)
@@ -327,7 +334,7 @@ def priviledged_reasoner_executer(
             "state": "degraded",
             "risk_score": 50,
             "confidence_score": 0,
-            "justification": f"Degradação automática por violação de schema ou token suspeito: {str(e)}",
+            "justification": f"Automatic degradation due to schema violation or suspicious token: {str(e)}",
             "tier_trace": [
                 {"tier": "C", "role": "reasoner", "status": "validation_failed"}
             ],
@@ -335,8 +342,12 @@ def priviledged_reasoner_executer(
             "techniques": [],
         }
     try:
+        if llm_client is None:
+            from openai import OpenAI
+
+            llm_client = OpenAI()
         user_prompt = user_prompt_constructor(valid_input)
-        response = llm_client.beta.chat.completion.parse(
+        response = llm_client.beta.chat.completions.parse(
             model=model_name,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -348,25 +359,40 @@ def priviledged_reasoner_executer(
         )
         parsed_output: Priviledged_Reasoner_Output = response.choices[0].message.parsed
     except Exception as e:
-        logger.error("Invariante 2 acionada: Falha de execução no provedor LLM: %s", e)
+        logger.error("Invariante 2 triggered: LLM provder failure: %s", e)
         return {
             "verdict": TriageVerdict.NEEDS_REVIEW.value,
             "state": "degraded",
-            "risk_score": 60
-            if valid_input.tier_a_rules.is_high_confidence_match
-            else 30,
+            "risk_score": 60 if valid_input.tier_a_container.is_sev_high else 30,
             "confidence_score": 0,
-            "justification": f"Degradação por indisponibilidade ou saída malformada do LLM: {str(e)}",
+            "justification": f"Degradation caused by unavailable service or bad output coming from LLM provider: {str(e)}",
             "tier_trace": [{"tier": "C", "role": "reasoner", "status": "llm_error"}],
             "recommended_response": [],
             "techniques": [],
         }
-    parsed_output.inspect_action_list(Valid_Target_Roster.model_validate(valid_input))
-    if valid_input.TIER_A_CONTAINER.is_sev_high:
+    if parsed_output is None:
+        logger.error(
+            "Invariant 12 triggered: Model refused processing or generated null output"
+        )
+        return {
+            "verdict": TriageVerdict.NEEDS_REVIEW.value,
+            "state": "degraded",
+            "risk_score": 50,
+            "confidence_score": 0,
+            "justification": "Degradation due to refusal or null exit from the language model",
+            "tier_trace": [
+                {"tier": "C", "role": "reasoner", "status": "model_refusal"}
+            ],
+            "recommended_response": [],
+            "techniques": [],
+        }
+    parsed_output.inspect_action_list(valid_input.target_roster)
+    final_verdict = parsed_output.verdict
+    if valid_input.tier_a_container.is_sev_high:
         if parsed_output.verdict == TriageVerdict.BENIGN:
             logger.warning(
                 "Invariant 1 triggered: Downgrading attempt blocked. \n High confidence '%s' forces Malicious verdict",
-                valid_input.TIER_A_CONTAINER.max_sev,
+                valid_input.tier_a_container.max_sev,
             )
             final_verdict = TriageVerdict.MALICIOUS
 
