@@ -11,10 +11,11 @@ from pydantic import (
 import re
 import logging
 from enum import StrEnum
-from typing import Dict, List, Literal, Optional, Set, Any, Union
+from typing import Dict, List, Literal, Optional, Set, Any
 from pydantic.networks import IPvAnyAddress
 import unicodedata
-
+import time
+import ipaddress
 
 logger = logging.getLogger("endpoint_arbiter.privileged_reasoner")
 
@@ -61,12 +62,24 @@ class MLReasonCode(StrEnum):
 
 class Destination_network_observables(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    IP_ADDRESS: Optional[Union[IPvAnyAddress, str]] = None
+    IP_ADDRESS: Optional[IPvAnyAddress] = None
     FQDN: Optional[str] = Field(
         default=None, max_length=253, pattern=r"^[a-zA-Z0-9.-]+$"
     )
-    DESTINATION_PORT: int = Field(ge=1, le=65535)
-    TRANSPORT_PROTOCOL: Literal["TCP", "UDP", "ICMP"]
+    DESTINATION_PORT: Optional[int] = Field(default=None, ge=1, le=65535)
+    TRANSPORT_PROTOCOL: Optional[Literal["TCP", "UDP", "ICMP", "OTHER"]] = None
+
+    @field_validator("IP_ADDRESS", mode="before")
+    @classmethod
+    def eval_ip(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+            return value
+        try:
+            return ipaddress.ip_address(value)
+        except ValueError:
+            raise ValueError(f"Invalid IP address: {value}")
 
     @model_validator(mode="after")
     def validate_destination_present(self) -> "Destination_network_observables":
@@ -98,15 +111,34 @@ class ResponsePriority(StrEnum):
     P3 = "P3"
 
 
+class Execution_priviledges(StrEnum):
+    ELEVATED = "ELEVATED"
+    STANDARD = "STANDARD"
+    SYSTEM = "SYSTEM"
+
+
 class Normalized_Target_Binaries(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     PROCESS_BINARY_NAME: str
     PARENT_BINARY_NAME: Optional[str] = None
-    EXECUTION_PRIVILEGE: bool
+    EXECUTION_PRIVILEGE: Execution_priviledges
+
+    @field_validator("EXECUTION_PRIVILEGE", mode="before")
+    @classmethod
+    def normalize_privilege(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            return (
+                Execution_priviledges.ELEVATED
+                if value
+                else Execution_priviledges.STANDARD
+            )
+        return value
 
     @field_validator("PROCESS_BINARY_NAME", "PARENT_BINARY_NAME", mode="before")
     @classmethod
-    def string_cleaning(cls, value: str) -> str:
+    def string_cleaning(cls, value: Any) -> Any:
+        if value is None:
+            return None
         if not isinstance(value, str):
             return value
         clean_char = []
@@ -115,7 +147,10 @@ class Normalized_Target_Binaries(BaseModel):
             if category not in ("Cf", "Cc"):
                 clean_char.append(x)
         clean_char = "".join(clean_char)
-        leaf_filename = PureWindowsPath(clean_char.strip("\"'/\\ "))
+        stripped = clean_char.strip("\"'/\\ ")
+        if not stripped:
+            raise ValueError("Filename cannot be empty")
+        leaf_filename = PureWindowsPath(stripped)
         EXTENSOES_WIN_EXEC = {
             ".exe",
             ".dll",
@@ -137,12 +172,6 @@ class Normalized_Target_Binaries(BaseModel):
             return value
         else:
             raise ValueError(f"Filename '{value}' breaks regex constrictions")
-
-
-class Execution_priviledges(StrEnum):
-    ELEVATED = "ELEVATED"
-    STANDART = "STANDART"
-    SYSTEM = "SYSTEM"
 
 
 SEVERITY_WEIGHTS: Dict[Rule_Severity, int] = {
@@ -191,15 +220,12 @@ class Aggregate_TierA_container(BaseModel):
         unique: Set[str] = set()
         for rule in self.MATCHED_RULES:
             unique.update(rule.MITRE_ATTACK_TECH)
-        return sorted(list[unique])
+        return sorted(unique)
 
     @computed_field
     @property
     def is_sev_high(self) -> bool:
-        if self.max_sev == "HIGH" or self.max_sev == "CRITICAL":
-            return True
-        else:
-            return False
+        return self.max_sev in (Rule_Severity.HIGH, Rule_Severity.CRITICAL)
 
 
 class TierB_Classifier(BaseModel):
@@ -229,25 +255,25 @@ class Valid_Target_Roster(BaseModel):
 
 class Provenance_Block(BaseModel):
     model_config = STRICT_MODEL_CONFIG
-    EVENT_ID: str = Field(..., pattern=r"^evt-[a-zA-Z0-9_-]+$")
-    EVENT_HASH: str = Field(..., pattern=r"^[a-f0-9]{64}$")
-    TIMESTAMP: str
+    event_id: str = Field(..., pattern=r"^evt-[a-zA-Z0-9_-]+$")
+    event_hash: str = Field(..., pattern=r"^[a-f0-9]{64}$")
+    timestamp: str
 
 
 class Extractor_Signals(BaseModel):
     model_config = STRICT_MODEL_CONFIG
-    PRIMARY_INTENT: Intent
-    SUB_INTENTS: List[Intent] = Field(default_factory=list)
-    SUSPICIOUS_CONSTRUCTS: List[Suspicious_Construct_Types] = Field(
+    primary_intent: Intent
+    sub_intents: List[Intent] = Field(default_factory=list)
+    suspicious_constructs: List[Suspicious_Construct_Types] = Field(
         default_factory=list
     )
-    OBFUSCATION_TYPE: Obfuscation_categories
+    obfuscation: Obfuscation_categories
 
 
 class Atomic_Tokens(BaseModel):
     model_config = STRICT_MODEL_CONFIG
-    NORMALIZED_PROCESS: Normalized_Target_Binaries
-    SANITIZED_TARGETS: List[Destination_network_observables] = Field(
+    normalized_target_binaries: Normalized_Target_Binaries
+    sanitized_targets: List[Destination_network_observables] = Field(
         default_factory=list
     )
 
@@ -261,20 +287,21 @@ class PriviledgedReasonerInput(BaseModel):
     tier_b_classifier: TierB_Classifier
     context_enrichment: List[Enrichment_Observable] = Field(default_factory=list)
     target_roster: Valid_Target_Roster
+    evidence_refs: List[str] = Field(default_factory=list)
 
 
 class Technical_Mapping(BaseModel):
     model_config = STRICT_MODEL_CONFIG
-    FRAMEWORK: Literal["MITRE_ATTACK", "MITRE_ATLAS"] = "MITRE_ATTACK"
-    ID: str = Field(..., pattern=r"^(T\d{4}(\.\d{3})?|AML\.T\d{4}(\.\d{3})?)$")
-    NAME: str
+    framework: Literal["MITRE_ATTACK", "MITRE_ATLAS"] = "MITRE_ATTACK"
+    id: str = Field(..., pattern=r"^(T\d{4}(\.\d{3})?|AML\.T\d{4}(\.\d{3})?)$")
+    name: str
 
 
 class Recommended_Response(BaseModel):
     model_config = STRICT_MODEL_CONFIG
-    ACTION: str
-    TARGET: str
-    PRIORITY: ResponsePriority
+    action: str
+    target: str
+    priority: ResponsePriority
 
 
 class Priviledged_Reasoner_Output(BaseModel):
@@ -282,22 +309,25 @@ class Priviledged_Reasoner_Output(BaseModel):
     verdict: TriageVerdict
     risk_score: int = Field(..., ge=0, le=100)
     confidence_score: int = Field(..., ge=0, le=100)
-    mapped_techniques: List[Technical_Mapping] = Field(default_factory=list)
+    techniques: List[Technical_Mapping] = Field(default_factory=list)
     justification: str
     recommended_response: List[Recommended_Response] = Field(default_factory=list)
+    evidence_refs: List[str] = Field(default_factory=list)
 
     def inspect_action_list(self, roster: Valid_Target_Roster) -> None:
-        allow = set(roster.HOSTS + roster.USERS + roster.IPS)
+        allow = {
+            target.lower() for target in (roster.HOSTS + roster.USERS + roster.IPS)
+        }
         possible_actions: List[Recommended_Response] = []
 
         for x in self.recommended_response:
-            if x.TARGET in allow:
+            if x.target.lower() in allow:
                 possible_actions.append(x)
             else:
                 logger.warning(
                     "Invariant 5 triggered: Unauthorized target '%s' discarded from action '%s'.",
-                    x.TARGET,
-                    x.ACTION,
+                    x.target,
+                    x.action,
                 )
         self.recommended_response = possible_actions
 
@@ -339,8 +369,13 @@ def priviledged_reasoner_executer(
                 {"tier": "C", "role": "reasoner", "status": "validation_failed"}
             ],
             "recommended_response": [],
+            "evidence_refs": [],
             "techniques": [],
+            "metrics": {"latency_ms": 0.0},
         }
+
+    duration: float = 0.0
+    start = time.monotonic()
     try:
         if llm_client is None:
             from openai import OpenAI
@@ -357,8 +392,10 @@ def priviledged_reasoner_executer(
             temperature=0.0,
             seed=42,
         )
+        duration = time.monotonic() - start
         parsed_output: Priviledged_Reasoner_Output = response.choices[0].message.parsed
     except Exception as e:
+        duration = time.monotonic() - start
         logger.error("Invariante 2 triggered: LLM provder failure: %s", e)
         return {
             "verdict": TriageVerdict.NEEDS_REVIEW.value,
@@ -368,9 +405,13 @@ def priviledged_reasoner_executer(
             "justification": f"Degradation caused by unavailable service or bad output coming from LLM provider: {str(e)}",
             "tier_trace": [{"tier": "C", "role": "reasoner", "status": "llm_error"}],
             "recommended_response": [],
+            "evidence_refs": [],
             "techniques": [],
+            "metrics": {"latency_ms": round(duration * 1000, 2)},
         }
+
     if parsed_output is None:
+        duration = time.monotonic() - start
         logger.error(
             "Invariant 12 triggered: Model refused processing or generated null output"
         )
@@ -384,22 +425,30 @@ def priviledged_reasoner_executer(
                 {"tier": "C", "role": "reasoner", "status": "model_refusal"}
             ],
             "recommended_response": [],
+            "evidence_refs": [],
             "techniques": [],
+            "metrics": {"latency_ms": round(duration * 1000, 2)},
         }
+
     parsed_output.inspect_action_list(valid_input.target_roster)
     final_verdict = parsed_output.verdict
+    risk_score = parsed_output.risk_score
+
     if valid_input.tier_a_container.is_sev_high:
-        if parsed_output.verdict == TriageVerdict.BENIGN:
+        if parsed_output.verdict != TriageVerdict.MALICIOUS:
             logger.warning(
                 "Invariant 1 triggered: Downgrading attempt blocked. \n High confidence '%s' forces Malicious verdict",
                 valid_input.tier_a_container.max_sev,
             )
             final_verdict = TriageVerdict.MALICIOUS
+            risk_score = max(parsed_output.risk_score, 75)
 
     result = parsed_output.model_dump()
+    result["risk_score"] = risk_score
     result["verdict"] = final_verdict.value
     result["state"] = "complete"
     result["tier_trace"] = [
         {"tier": "C", "role": "reasoner", "model_version": model_name}
     ]
+    result["metrics"] = {"latency_ms": round(duration * 1000, 2)}
     return result
