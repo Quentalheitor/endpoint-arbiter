@@ -61,7 +61,7 @@ class MLReasonCode(StrEnum):
 
 
 class Destination_network_observables(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = STRICT_MODEL_CONFIG
     IP_ADDRESS: Optional[IPvAnyAddress] = None
     FQDN: Optional[str] = Field(
         default=None, max_length=253, pattern=r"^[a-zA-Z0-9.-]+$"
@@ -118,7 +118,7 @@ class Execution_priviledges(StrEnum):
 
 
 class Normalized_Target_Binaries(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = STRICT_MODEL_CONFIG
     PROCESS_BINARY_NAME: str
     PARENT_BINARY_NAME: Optional[str] = None
     EXECUTION_PRIVILEGE: Execution_priviledges
@@ -132,6 +132,11 @@ class Normalized_Target_Binaries(BaseModel):
                 if value
                 else Execution_priviledges.STANDARD
             )
+        if isinstance(value, str):
+            try:
+                return Execution_priviledges(value)
+            except ValueError:
+                raise ValueError(f"Invalid privilege enum: {value}")
         return value
 
     @field_validator("PROCESS_BINARY_NAME", "PARENT_BINARY_NAME", mode="before")
@@ -151,14 +156,14 @@ class Normalized_Target_Binaries(BaseModel):
         if not stripped:
             raise ValueError("Filename cannot be empty")
         leaf_filename = PureWindowsPath(stripped)
-        EXTENSOES_WIN_EXEC = {
+        WIN_EXEC_EXTENSIONS = {
             ".exe",
             ".dll",
             ".sys",
             ".scr",
             ".bin",
         }
-        if leaf_filename.suffix.lower() in EXTENSOES_WIN_EXEC:
+        if leaf_filename.suffix.lower() in WIN_EXEC_EXTENSIONS:
             return leaf_filename.name.lower()
         else:
             raise ValueError("Filename does not posses approved executable extension")
@@ -191,6 +196,16 @@ class Rule_Match_TierA(BaseModel):
     RULE_SEVERITY: Rule_Severity
     MITRE_ATTACK_TECH: list[str] = Field(default_factory=list)
     RULE_TITLE: Optional[str] = None
+
+    @field_validator("RULE_SEVERITY", mode="before")
+    @classmethod
+    def validate_rule_severity(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return Rule_Severity(value)
+            except ValueError:
+                raise ValueError(f"Invalid rule severity: {value}")
+        return value
 
     @field_validator("MITRE_ATTACK_TECH")
     @classmethod
@@ -233,6 +248,22 @@ class TierB_Classifier(BaseModel):
     MALICIOUS_PROBABILITY: float = Field(..., ge=0.0, le=1.0)
     REASON_CODES: List[MLReasonCode] = Field(default_factory=list)
 
+    @field_validator("REASON_CODES", mode="before")
+    @classmethod
+    def parse_reason_codes(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            parsed = []
+            for item in value:
+                if isinstance(item, str):
+                    try:
+                        parsed.append(MLReasonCode(item))
+                    except ValueError:
+                        raise ValueError(f"Invalid MLReasonCode: {item}")
+                else:
+                    parsed.append(item)
+            return parsed
+        return value
+
 
 class Enrichment_Observable(BaseModel):
     model_config = STRICT_MODEL_CONFIG
@@ -269,6 +300,58 @@ class Extractor_Signals(BaseModel):
     )
     obfuscation: Obfuscation_categories
 
+    @field_validator("primary_intent", mode="before")
+    @classmethod
+    def parse_primary_intent(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return Intent(value)
+            except ValueError:
+                raise ValueError(f"Invalid primary_intent: {value}")
+        return value
+
+    @field_validator("sub_intents", mode="before")
+    @classmethod
+    def parse_sub_intents(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            parsed = []
+            for item in value:
+                if isinstance(item, str):
+                    try:
+                        parsed.append(Intent(item))
+                    except ValueError:
+                        raise ValueError(f"Invalid sub_intent: {item}")
+                else:
+                    parsed.append(item)
+            return parsed
+        return value
+
+    @field_validator("suspicious_constructs", mode="before")
+    @classmethod
+    def parse_suspicious_constructs(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            parsed = []
+            for item in value:
+                if isinstance(item, str):
+                    try:
+                        parsed.append(Suspicious_Construct_Types(item))
+                    except ValueError:
+                        raise ValueError(f"Invalid suspicious_construct: {item}")
+                else:
+                    parsed.append(item)
+            return parsed
+        return value
+
+    @field_validator("obfuscation", mode="before")
+    @classmethod
+    def parse_obfuscation(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return Obfuscation_categories(value)
+            except ValueError:
+                raise ValueError(f"Invalid obfuscation: {value}")
+        return value
+
 
 class Atomic_Tokens(BaseModel):
     model_config = STRICT_MODEL_CONFIG
@@ -303,6 +386,16 @@ class Recommended_Response(BaseModel):
     target: str
     priority: ResponsePriority
 
+    @field_validator("priority", mode="before")
+    @classmethod
+    def parse_priority(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return ResponsePriority(value)
+            except ValueError:
+                raise ValueError(f"Invalid priority: {value}")
+        return value
+
 
 class Priviledged_Reasoner_Output(BaseModel):
     model_config = STRICT_MODEL_CONFIG
@@ -313,6 +406,16 @@ class Priviledged_Reasoner_Output(BaseModel):
     justification: str
     recommended_response: List[Recommended_Response] = Field(default_factory=list)
     evidence_refs: List[str] = Field(default_factory=list)
+
+    @field_validator("verdict", mode="before")
+    @classmethod
+    def parse_verdict(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return TriageVerdict(value)
+            except ValueError:
+                raise ValueError(f"Invalid verdict: {value}")
+        return value
 
     def inspect_action_list(self, roster: Valid_Target_Roster) -> None:
         allow = {
@@ -396,7 +499,7 @@ def priviledged_reasoner_executer(
         parsed_output: Priviledged_Reasoner_Output = response.choices[0].message.parsed
     except Exception as e:
         duration = time.monotonic() - start
-        logger.error("Invariante 2 triggered: LLM provder failure: %s", e)
+        logger.error("Invariant 2 triggered: LLM provider failure: %s", e)
         return {
             "verdict": TriageVerdict.NEEDS_REVIEW.value,
             "state": "degraded",
@@ -413,7 +516,7 @@ def priviledged_reasoner_executer(
     if parsed_output is None:
         duration = time.monotonic() - start
         logger.error(
-            "Invariant 2 triggered: Model refused processing or generated null output"
+            "Invariant 12 triggered: Model refused processing or generated null output"
         )
         return {
             "verdict": TriageVerdict.NEEDS_REVIEW.value,

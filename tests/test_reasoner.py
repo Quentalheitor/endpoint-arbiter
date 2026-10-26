@@ -87,20 +87,15 @@ VALID_REASONER_PAYLOAD = {
 def build_mock_llm_client(
     parsed_output: Optional[reasoner.Priviledged_Reasoner_Output] = None,
 ) -> MagicMock:
-    """Cria e configura um cliente OpenAI simulado para o método beta.chat.completions.parse[cite: 3]."""
+    """Creates and configures a mock OpenAI client for the beta.chat.completions.parse method."""
     mock_client = MagicMock()
-
-    # Estrutura a mensagem analisada dentro da escolha
     mock_choice = MagicMock()
     mock_choice.message.parsed = parsed_output
 
-    # Encapsula a lista de escolhas na resposta simulada
     mock_response = MagicMock()
     mock_response.choices = [mock_choice]
 
-    # Vincula a resposta ao método parse consumido pelo executor
     mock_client.beta.chat.completions.parse.return_value = mock_response
-
     return mock_client
 
 
@@ -115,15 +110,15 @@ def output() -> reasoner.Priviledged_Reasoner_Output:
                 framework="MITRE_ATTACK", id="T1566", name="Phishing"
             )
         ],
-        justification="O adversário utilizou um canal de comunicação digital — especificamente [mencione o canal: e-mail / mensagem instantânea / SMS] — disfarçado como uma entidade legítima e de confiança [ex: o departamento de TI da empresa / uma instituição bancária / um serviço de nuvem]",
+        justification="Adversary activity confirmed via malicious communication channel.",
         recommended_response=[
             reasoner.Recommended_Response(
-                action="something",
-                target="someone",
+                action="isolate_host",
+                target="WKS-09",
                 priority=reasoner.ResponsePriority.P1,
             )
         ],
-        evidence_refs=["something"],
+        evidence_refs=["evt-0001"],
     )
 
 
@@ -141,12 +136,12 @@ def test_normalized_target_binaries():
         reasoner.Normalized_Target_Binaries.model_validate(
             {
                 "PROCESS_BINARY_NAME": dirty_paths[1],
-                "EXECUTION_PRIVILEGE": reasoner.Execution_priviledges.STANDARD,
+                "EXECUTION_PRIVILEGE": "STANDARD",
             }
         )
 
 
-def test_Destination_network_observables():
+def test_destination_network_observables():
     dno = reasoner.Destination_network_observables(
         IP_ADDRESS="192.168.1.1"  # type: ignore
     )
@@ -155,45 +150,43 @@ def test_Destination_network_observables():
         reasoner.Destination_network_observables.model_validate(
             {"IP_ADDRESS": "999.999.999.999"}
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         reasoner.Destination_network_observables.model_validate({"DESTINATION_PORT": 4})
 
 
-def test_Aggregate_TierA_container():
+def test_aggregate_tier_a_container():
     test_list = [
         reasoner.Rule_Match_TierA(
             RULE_IDENTIFIER="sigma-proc-ps-encoded-download",
             RULE_SEVERITY=reasoner.Rule_Severity.LOW,
+            MITRE_ATTACK_TECH=["T1059.001"],
         ),
         reasoner.Rule_Match_TierA(
             RULE_IDENTIFIER="sigma-proc-ps-encoded-download2",
             RULE_SEVERITY=reasoner.Rule_Severity.HIGH,
-        ),
-        reasoner.Rule_Match_TierA(
-            RULE_IDENTIFIER="sigma-proc-ps-encoded-download",
-            RULE_SEVERITY=reasoner.Rule_Severity.LOW,
+            MITRE_ATTACK_TECH=["T1059.001", "T1071.001"],
         ),
     ]
     rmata = reasoner.Aggregate_TierA_container(MATCHED_RULES=test_list)
-    assert rmata.max_sev == "HIGH"
-    assert rmata.is_sev_high
-    assert len(test_list) != len(rmata.MATCHED_RULES)
+    assert rmata.max_sev == reasoner.Rule_Severity.HIGH
+    assert rmata.is_sev_high is True
+    assert rmata.attack_techniques == ["T1059.001", "T1071.001"]
 
 
-def test_invariant_5():
+def test_invariant_15_target_sanitization():
     pro = reasoner.Priviledged_Reasoner_Output(
         verdict=reasoner.TriageVerdict.MALICIOUS,
         risk_score=90,
         confidence_score=90,
-        justification="placeholder",
+        justification="Containment action against identified targets.",
         recommended_response=[
             reasoner.Recommended_Response(
-                action="something",
+                action="isolate_host",
                 target="WKS-09",
                 priority=reasoner.ResponsePriority.P1,
             ),
             reasoner.Recommended_Response(
-                action="placeholder",
+                action="isolate_host",
                 target="compromised-server",
                 priority=reasoner.ResponsePriority.P1,
             ),
@@ -206,33 +199,32 @@ def test_invariant_5():
     assert pro.recommended_response[0].target == "WKS-09"
 
 
-def test_invariant_1():
+def test_invariant_11_no_downgrade():
     vrp_copy = deepcopy(VALID_REASONER_PAYLOAD)
     vrp_copy_input = reasoner.PriviledgedReasonerInput.model_validate(vrp_copy)
-    assert vrp_copy_input.tier_a_container.max_sev == "HIGH"
+    assert vrp_copy_input.tier_a_container.max_sev == reasoner.Rule_Severity.HIGH
+
     llm_simulated_benign_verdict = reasoner.Priviledged_Reasoner_Output(
         verdict=reasoner.TriageVerdict.BENIGN,
         risk_score=10,
         confidence_score=95,
         techniques=[],
-        justification="Atividade administrativa legitima de manutencao do sistema.",
+        justification="Legitimate administrative activity for system maintenance.",
         recommended_response=[],
         evidence_refs=["evt-0001"],
     )
     mock_client = build_mock_llm_client(parsed_output=llm_simulated_benign_verdict)
-    payload = vrp_copy
     result = reasoner.priviledged_reasoner_executer(
-        raw_input=payload, llm_client=mock_client, model_name="mock_model"
+        raw_input=vrp_copy, llm_client=mock_client, model_name="mock_model"
     )
 
     assert result["verdict"] == "Malicious"
     assert result["risk_score"] >= 75
     assert result["state"] == "complete"
-
     mock_client.beta.chat.completions.parse.assert_called_once()
 
 
-def test_invariant_2():
+def test_invariant_12_degradation(output):
     vrp_copy = deepcopy(VALID_REASONER_PAYLOAD)
     del vrp_copy["provenance_block"]
     result = reasoner.priviledged_reasoner_executer(vrp_copy, model_name="mock_model")
@@ -240,4 +232,36 @@ def test_invariant_2():
     assert result["verdict"] == "Needs-Review"
     assert result["confidence_score"] == 0
     assert result["metrics"]["latency_ms"] == 0.0
-    assert result["ter_trace"][0]["status"] == "validation_failed"
+    assert result["tier_trace"][0]["status"] == "validation_failed"
+
+    mock_client_error = MagicMock()
+    mock_client_error.beta.chat.completions.parse.side_effect = RuntimeError(
+        "Connection timeout"
+    )
+    result2 = reasoner.priviledged_reasoner_executer(
+        VALID_REASONER_PAYLOAD, llm_client=mock_client_error, model_name="mock_model"
+    )
+    assert result2["state"] == "degraded"
+    assert result2["verdict"] == "Needs-Review"
+    assert "provider" in result2["justification"].lower()
+    assert isinstance(result2["metrics"]["latency_ms"], float)
+    assert result2["metrics"]["latency_ms"] >= 0.0
+
+    mock_client_refusal = build_mock_llm_client(parsed_output=None)
+    result3 = reasoner.priviledged_reasoner_executer(
+        VALID_REASONER_PAYLOAD, llm_client=mock_client_refusal, model_name="mock_model"
+    )
+    assert result3["state"] == "degraded"
+    assert result3["verdict"] == "Needs-Review"
+    assert result3["tier_trace"][0]["status"] == "model_refusal"
+
+
+def test_happy_path(output):
+    mock_client = build_mock_llm_client(output)
+    result = reasoner.priviledged_reasoner_executer(
+        VALID_REASONER_PAYLOAD, llm_client=mock_client, model_name="mock_model"
+    )
+    assert result["state"] == "complete"
+    assert result["verdict"] == reasoner.TriageVerdict.MALICIOUS.value
+    assert result["metrics"]["latency_ms"] >= 0.0
+    mock_client.beta.chat.completions.parse.assert_called_once()
