@@ -413,7 +413,7 @@ def priviledged_reasoner_executer(
     if parsed_output is None:
         duration = time.monotonic() - start
         logger.error(
-            "Invariant 12 triggered: Model refused processing or generated null output"
+            "Invariant 2 triggered: Model refused processing or generated null output"
         )
         return {
             "verdict": TriageVerdict.NEEDS_REVIEW.value,

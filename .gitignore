@@ -117,7 +117,7 @@ cython_debug/
 .DS_Store
 Thumbs.db
 sklearn
-# Databases & local generated artifacts (FlyRank Requirement)
+# Databases & local generated artifacts
 data/
 *.duckdb
 *.duckdb.wal
