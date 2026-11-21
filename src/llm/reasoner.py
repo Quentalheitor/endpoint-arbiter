@@ -435,7 +435,7 @@ class Priviledged_Reasoner_Output(BaseModel):
         self.recommended_response = possible_actions
 
 
-SYSTEM_PROMPT = """You are the Priviledged Reasoner of an endpoint security triage pipeline (SOC).
+REASONER_SYSTEM_PROMPT = """You are the Priviledged Reasoner of an endpoint security triage pipeline (SOC).
 Your responsibility is to rate the structured behavior indicators, pre-computed deterministic rules, statistic
 score and the intelligence of threats to deliver a final verdict, risk score, and MITRE ATT&CK mapping.
 
@@ -488,7 +488,7 @@ def priviledged_reasoner_executer(
         response = llm_client.beta.chat.completions.parse(
             model=model_name,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": REASONER_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
             response_format=Priviledged_Reasoner_Output,
@@ -496,7 +496,9 @@ def priviledged_reasoner_executer(
             seed=42,
         )
         duration = time.monotonic() - start
-        parsed_output: Priviledged_Reasoner_Output = response.choices[0].message.parsed
+        parsed_output: Priviledged_Reasoner_Output | None = response.choices[
+            0
+        ].message.parsed
     except Exception as e:
         duration = time.monotonic() - start
         logger.error("Invariant 2 triggered: LLM provider failure: %s", e)
@@ -516,7 +518,7 @@ def priviledged_reasoner_executer(
     if parsed_output is None:
         duration = time.monotonic() - start
         logger.error(
-            "Invariant 12 triggered: Model refused processing or generated null output"
+            "Invariant 2 triggered: Model refused processing or generated null output"
         )
         return {
             "verdict": TriageVerdict.NEEDS_REVIEW.value,
