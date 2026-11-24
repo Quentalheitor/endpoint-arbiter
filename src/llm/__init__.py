@@ -5,6 +5,5 @@ untrusted telemetry within strict schema boundaries, preventing adversarial
 prompt injection from steering downstream privileged actions.
 """
 
-from src.llm.extractor import QuarantinedExtractor
-
-__all__ = ["QuarantinedExtractor"]
+# fmt: off
+from .extractor import QuarantinedExtractorInput, QuarantinedExtractorOutput # noqa: F401
