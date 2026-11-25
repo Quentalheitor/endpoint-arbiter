@@ -18,7 +18,7 @@ from llm import reasoner,extractor # noqa: E402
 
 
 VALID_EXTRACTOR_PAYLOAD = {
-    "event_id" : "evt-001",
+    "event_id" : "evt-0001",
     "timestamp" : "2026-10-03T14:32:01.004000Z",
     "raw_event_payload" : {"process_path":"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
                            "command_line":"powershell.exe -enc SQBFAFgaHIBddbSMeCOUElAeds",
@@ -124,7 +124,7 @@ def test_extractor_blocks_dirty_llm_output():
 
 def test_extractor_degradation_paths():
     degradated_copy = deepcopy(VALID_EXTRACTOR_PAYLOAD)
-    degradated_copy["event_id"] = "001"
+    degradated_copy["event_id"] = "0001"
     result = extractor.quarantined_extractor_executer(raw_telemetry=degradated_copy)
     assert result["state"] == "degraded"
     assert result["status"] == "Extraction failed"
@@ -154,7 +154,7 @@ def test_extractor_happy_path(valid_extractor_output):
     assert result["state"] == "complete"
     assert result["tier_trace"][0]["status"] == "success"
     assert result["tier_trace"][0]["tier"] == "B_extractor"
-    assert result["provenance_block"]["event_id"] == "evt-001"
+    assert result["provenance_block"]["event_id"] == "evt-0001"
     assert len(result["provenance_block"]["event_hash"]) == 64
     assert result["extractor_signal"]["primary_intent"] == "DOWNLOAD_EXECUTE"
     assert result["atomic_tokens"]["normalized_target_binaries"]["PROCESS_BINARY_NAME"] =="powershell.exe"
